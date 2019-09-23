@@ -1,0 +1,200 @@
+Instalando Expect
+En el caso de las sistemas Linux esta herramienta puede venir instalada por defecto. Si no es nuestro caso y nuestra distribución es Debian o Ubuntu, podemos usar ‘apt-get’:
+
+$ sudo apt-get install expect
+Para entornos como Fedora o CentOs, la instalación se realiza a través de ‘yum’. En el caso de los sistemas Mac, se puede instalar del mismo modo a través de HomeBrew:
+
+$ sudo yum install expect
+En Windows la instalación es un poco más laboriosa. Debemos descargarnos las librerías Expect desde sourceforge y los binarios tcl desde ActiveState. Tras instalar las librerías se deberá compilar el código y referenciar en el path los archivos generados para poder utilizar Expect con normalidad. En los archivos descargados se puede encontrar información detallada acerca de cómo instalar la herramienta.
+
+En este punto ya tenemos instalada la nueva herramienta y lista para funcionar.
+
+Ejecutando Expect
+En el apartado anterior hemos comentado las formas de instalar Expect en función del sistema operativo. 
+En este caso vamos a utilizar Ubuntu, ya que es de los más sencillos tanto para instalarlo como para crear nuestros scripts.
+
+Podemos arrancar abriendo la consola de Expect con este comando:
+
+$ expect
+
+Desde aquí podemos probar los comandos más comunes y hacer algunas pruebas base:
+
+Para comprender mejor cómo se procesan las respuestas de la consola, debemos ver el comportamiento de las variables expect_out (0, string) y expect_out (buffer).
+
+expect_out (0, string) contiene la cadena de texto que se corresponde (match) con lo que Expect espera.
+expect_out (buffer) contiene toda la cadena recibida por Expect, incluida (o no)  expect_out (0, string).
+Si tenemos este script:
+
+expect "Hola\n"
+send "Has escrito <$expect_out (buffer)>" 
+send "Pero solo esperaba <$expect_out(O,string)>"
+
+Al lanzarlo se nos permitirá introducir el texto que queramos. Supongamos que introducimos esto:
+
+Buenas!
+Hola
+Has escrito <Buenas! Hola>
+Pero solo esperaba <Hola>
+
+Uso de Expect a través de scripts Ficheros .exp
+
+Por convención, Expect utiliza la extensión .exp en sus scripts, pero la llamada que ejecuta los scripts le es indiferente la extensión. 
+Se podría indicar .sh o directamente ninguna. 
+Únicamente se debe indicar al inicio del fichero 
+
+#!/usr/bin/expect 
+
+para que se interprete correctamente.
+
+Expect utiliza TCL (Tool Command Languaje). 
+Esto significa que utiliza las instrucciones más comunes en scripting, como son if, for o break, evalúa expresiones y otras características como recursividad o declaración de procedimientos y subrutinas. Los comandos más importantes, sobre los que basamos los siguientes ejemplos, son spawn, expect  y send.
+
+Spawn: Se trata del comando base de cualquier script de Expect. 
+Esta instrucción inicia el programa o proceso externo con el que se va a interactuar. 
+A cada proceso que se inicia se le asigna un id que se almacena en una variable llamada spawn_id que le sirve a Expect para diferenciar el proceso sobre el que actúa. 
+El primer argumento de spawn es el proceso a ejecutar y los argumentos siguientes son los propios argumentos del proceso. Por ejemplo:
+
+spawn ftp ftp.host.net
+spawn ssh  usuario@host
+spawn sh install_all.sh
+
+Expect: Este comando analiza la salida del programa lanzado con spawn y actúa en consecuencia. 
+Cada comando expect está ligado a un spawn_id que se asigna según el orden de aparición del spawn, por defecto se asocia al proceso lanzado más recientemente.
+
+Send: Instrucción básica de respuesta de Expect. 
+Cuando la salida del proceso concuerda con la indicada en el comando expect, send envía lo que le indiquemos al programa. 
+También se vale de la variable spawn_id para asociarse al proceso que le corresponde. Por ejemplo:
+
+spawn /bin/sh
+expect "\\$ "
+send "ls -la\r"
+
+Para ver la estructura básica de un script .exp, aquí tenemos un ejemplo de automatización de un comando scp:  
+
+#/bin/sh
+scp /ruta/origen usuario@host:/ruta/destino/
+
+Si ejecutamos el script anterior como sh convencional, el comando scp nos irá solicitando las contraseñas de la máquina host.
+
+Con Expect hacemos la llamada lanzando scp de forma independiente y procesando la entrada estándar de consola. 
+Cuando se detecte la cadena ‘password:’, se introducirá lo que le indiquemos de forma automática.
+
+#!/usr/bin/expect -f
+set filename [lindex $argv 0]
+set timeout -1
+spawn scp $filename user@host:/home/user/
+set pass "password"
+
+expect {
+      password: {send "$pass\r" ; exp_continue}
+      eof exit
+ }
+
+En la primera línea 
+
+#!/usr/bin/expect -f 
+
+indicamos que el script debe ejecutarse con Expect y que los comandos vendrán introducidos por fichero .exp_continue e indica al script que no evalúe más expresiones y continúe con la siguiente instrucción.
+
+Cada vez que se llama a esta acción, el timeout de espera (por defecto cada 10 segundos) para cada respuesta de consola se reinicia. 
+Esto se puede evitar indicando exp_continue –continue_timer.
+
+Los ficheros de Expect (.exp) pueden ejecutarse de este modo siempre que tengan el permiso adecuado de ejecución:
+
+$ chmod +x script01.exp
+$ expect script01.exp
+
+Login remoto con Expect
+
+En el próximo ejemplo vamos a escribir y comentar un script más completo que actúe en una máquina remota. 
+Levantaremos una sesión ssh incluyendo logs y control de errores.
+
+#!/usr/bin/expect -f
+# Uso sshlogin.exp <ssh user> <ssh host> <ssh password>
+#Seteamos timeout personalizado y procesamos los argumentos.
+set timeout 20
+set ip [lindex $argv 0]
+set user [lindex $argv 1]
+set password [lindex $argv 2]
+#regex con los caracteres mas comunes en las consolas (habitualmente '$')
+set prompt "(%|#|I|\\$)" ;
+  
+proc logger {message} {
+
+#Método que imprime por pantalla a modo de log.
+set HEADER \[DEPLOY_LOG\];
+#puts imprime por consola lo que indiquemos.
+puts "\n $HEADER $message $HEADER \n";
+ }
+
+proc exit_on_error {message} {
+
+#Ha habido un error. Traceamos y salimos.
+
+logger $message
+
+exit 1  }
+
+#Login ssh
+logger "Conectando a $ip como $user"
+#Lanzamos la sesión ssh sin comprobar la existencia del host en la máquina
+#Ver alternativa a "StrictHostKeyChecking no"
+spawn ssh -o "StrictHostKeyChecking no" "$user\@$ip";
+   
+expect {
+#Control de las posibles entradas. Timeout, eof genérico o peticion de pass
+       "*assword" {send "$password\r"; 
+             logger "Login en $ip como $user correcto."
+
+#Con exp_continue, indicamos que vuelva a procesar la entrada con los inputs #de este bloque expect. 
+Si la pass es incorrecta no se quedará colgado ya que #hay un numero de intentos máximos y saldrá por eof
+
+                   exp_continue
+            }
+  -re $prompt {
+
+#Si la conexión ha ido bien, recibiremos una línea con un #carácter (%|#|I|\\$) 
+
+         logger "Login en $ip como $user correcto."
+
+  } 
+
+        timeout {exit_on_error "Fallo en la conexión SSH en expect" }
+        eof {exit_on_error "Fallo en la conexión SSH en expect. Salimos."}
+ }
+
+  
+#Sin timeout
+set timeout –1
+#Finalmente, el script deja el control al usuario
+interact
+
+Si queremos evitar indicar StrictHostKeyChecking no podemos controlar la comprobación de las keys:
+
+spawn ssh "$user\@$ip";
+expect "yes/no" {
+           send "yes\r"
+           expect "*assword" { send "$password\r" }                 } 
+"*assword" { send "$password" }
+}
+
+Se habrá notado un agujero de seguridad bastante evidente en estos scripts. 
+Como son ejemplos introductorios, no hemos tenido en cuenta el hecho de escribir en plano o por parámetro una contraseña para una conexión remota, pero cuando usemos Expect en otros entornos la forma correcta de proceder es mediante encriptaciones (por ejemplo, con openssl) en ficheros protegidos o SSH keys.
+
+Autoexpect
+
+Hemos visto varios scripts que muestran los aspectos básicos de Expect y las funciones de sus comandos principales.
+
+Para llevar esta librería (o vaguear) al siguiente nivel, debemos comentar la herramienta Autoexpect que, al ejecutarse, observa las instrucciones que realiza el usuario y genera un script de Expect de forma autónoma.
+
+Autoexpect viene unido a Expect, por lo que no sería necesario realizar ninguna instalación adicional. 
+El código generado es algo tosco, pero puede afinarse fácilmente:
+
+$ autoexpect
+
+A partir de este punto, Autoexpect irá incluyendo en el fichero script.exp los comandos que se introduzcan por consola en lenguaje expect. 
+De este modo, cuando se complete el trabajo y se cierre la terminal (o el comando exit), el fichero resultante será completamente viable para ejecutarlo como un .exp normal.
+
+Se debe tener en cuenta que también se guarda la salida completa de la consola, por lo que si esa salida contiene datos variables (como fechas en ssh o date), el script no va a funcionar dado que no coincide exactamente la salida de la consola.
+
+Para evitar esto, Autoexpect puede ejecutar en modo ‘promt’, mediante el cual únicamente guarda la última línea de la salida de consola.
